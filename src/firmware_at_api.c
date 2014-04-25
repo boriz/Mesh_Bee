@@ -124,7 +124,7 @@ static AT_Command_t atCommands[] =
     { "IF", NULL, FALSE, 0, 0, NULL, AT_showInfo },
 
     //exit at mode into data mode
-    { "EX", NULL, FALSE, 0, 0, NULL, AT_enterDataMode },
+    { "DT", NULL, FALSE, 0, 0, NULL, AT_enterDataMode },
 
     //exit at mode into data mode
     { "AP", NULL, FALSE, 0, 0, NULL, AT_enterApiMode },
@@ -1494,6 +1494,7 @@ int API_i32AdsProcessStackEvent(ZPS_tsAfEvent sStackEvent)
     	  size = vCopyApiSpec(&apiSpec, tmp);
     	  CMI_vTxData(tmp, size);
     	  PDUM_eAPduFreeAPduInstance(hapdu_ins);
+    	  result = OK;
           break;
 
       /* Data */
@@ -1501,6 +1502,7 @@ int API_i32AdsProcessStackEvent(ZPS_tsAfEvent sStackEvent)
     	  size = vCopyApiSpec(&apiSpec, tmp);
           CMI_vTxData(tmp, size);
           PDUM_eAPduFreeAPduInstance(hapdu_ins);
+          result = OK;
     	  break;
       /* default:do nothing */
       default:
