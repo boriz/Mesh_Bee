@@ -41,8 +41,6 @@
 #define PREAMBLE        0xed
 /* API frame delimiter */
 #define API_DELIMITER 			0x7e
-
-
 #define ATHEADERLEN     4
 
 /****************************************************************************/
@@ -52,6 +50,8 @@ int API_Reboot(tsApiSpec *inputApiSpec, tsApiSpec *retApiSpec, uint16 *regAddr);
 int API_QueryOnChipTemper(tsApiSpec *inputApiSpec, tsApiSpec *retApiSpec, uint16 *regAddr);
 int API_TestPrint(tsApiSpec *inputApiSpec, tsApiSpec *retApiSpec, uint16 *regAddr);
 int API_i32SetGpio(tsApiSpec *reqApiSpec, tsApiSpec *respApiSpec, uint16 *regAddr);
+int API_listAllNodes(tsApiSpec *reqApiSpec, tsApiSpec *respApiSpec, uint16 *regAddr);
+int API_showInfo(tsApiSpec *reqApiSpec, tsApiSpec *respApiSpec, uint16 *regAddr);
 
 
 //AT reg print functions
@@ -167,7 +167,15 @@ static AT_Command_ApiMode_t atCommandsApiMode[] =
 	{ "ATTP", ATTP, NULL, FALSE, 0 ,0, API_TestPrint},
 
 	/* Set digital output */
-	{"ATIO", ATIO, NULL, FALSE, 0, 0, API_i32SetGpio}
+	{"ATIO", ATIO, NULL, FALSE, 0, 0, API_i32SetGpio},
+
+	{ "LA", ATLA, NULL, FALSE, 0, 0, API_listAllNodes },
+
+#ifndef TARGET_COO
+	{ "LN", ATLN, NULL, FALSE, 0, 0, API_listNetworkScaned },
+#endif
+
+	{ "IF", ATIF, NULL, FALSE, 0, 0, API_showInfo }
 };
 
 
@@ -444,7 +452,7 @@ int getHexParamData(uint8 *buf, int len, uint16 *result, int size)
  * NAME: assembleLocalAtResp
  *
  * DESCRIPTION:
- * 
+ *
  *
  * PARAMETERS: Name         RW  Usage
  *
@@ -466,7 +474,7 @@ void assembleLocalAtResp(tsLocalAtResp *resp, uint8 frm_id, uint8 cmd_id, uint8 
  * NAME: assembleRemoteAtResp
  *
  * DESCRIPTION:
- * 
+ *
  *
  * PARAMETERS: Name         RW  Usage
  *
@@ -489,7 +497,7 @@ void assembleRemoteAtResp(tsRemoteAtResp *resp, uint8 frm_id, uint8 cmd_id, uint
  * NAME: assembleApiSpec
  *
  * DESCRIPTION:
- * 
+ *
  *
  * PARAMETERS: Name         RW  Usage
  *
@@ -1284,7 +1292,134 @@ int API_TestPrint(tsApiSpec *inputApiSpec, tsApiSpec *retApiSpec, uint16 *regAdd
 	return OK;
 }
 
+/****************************************************************************
+*
+* NAME: API_i32SetGpio
+*
+* DESCRIPTION:
+*
+*
+* PARAMETERS: Name         RW  Usage
+*
+* RETURNS:
+* int
+* apiSpec, returned tsApiSpec Frame
+*
+****************************************************************************/
+int API_listAllNodes(tsApiSpec *reqApiSpec, tsApiSpec *respApiSpec, uint16 *regAddr)
+{
+	tsTopoInfo topoInfo;
+	memset(&topoInfo, 0, sizeof(topoInfo));
 
+	topoInfo.nodeMacAddr0 = (uint32)ZPS_u64AplZdoGetIeeeAddr();
+	topoInfo.nodeMacAddr1 = (uint32)(ZPS_u64AplZdoGetIeeeAddr() >> 32);
+	topoInfo.nodeFWVer = (uint16)(FW_VERSION);
+
+	if(API_LOCAL_AT_REQ == reqApiSpec->teApiIdentifier)
+	{
+		tsLocalAtResp localAtResp;
+		memset(&localAtResp, 0, sizeof(tsLocalAtResp));
+
+		/* Assemble LocalAtResp */
+		assembleLocalAtResp(&localAtResp,
+				            reqApiSpec->payload.localAtReq.frameId,
+				            ATLA,
+				            AT_OK,
+				            (uint8*)&topoInfo,
+				            sizeof(tsTopoInfo));
+
+		/* Assemble apiSpec */
+		assembleApiSpec(respApiSpec,
+				        sizeof(tsLocalAtResp),
+				        API_LOCAL_AT_RESP,
+				        (uint8*)&localAtResp,
+				        sizeof(tsLocalAtResp));
+	}
+	else if(API_REMOTE_AT_REQ == reqApiSpec->teApiIdentifier)
+	{
+		tsRemoteAtResp remoteAtResp;
+        memset(&remoteAtResp, 0, sizeof(tsRemoteAtResp));
+
+        /* Assemble RemoteAtResp */
+        assembleRemoteAtResp(&remoteAtResp,
+        		             reqApiSpec->payload.remoteAtReq.frameId,
+        		             ATLA,
+        		             AT_OK,
+        		             (uint8*)&topoInfo,
+        		             sizeof(tsTopoInfo),
+        		             reqApiSpec->payload.remoteAtReq.unicastAddr);
+
+        /* Assemble apiSpec */
+        assembleApiSpec(respApiSpec,
+						sizeof(tsRemoteAtResp),
+						API_REMOTE_AT_RESP,
+						(uint8*)&remoteAtResp,
+						sizeof(tsRemoteAtResp));
+	}
+	return OK;
+}
+
+
+int API_showInfo(tsApiSpec *reqApiSpec, tsApiSpec *respApiSpec, uint16 *regAddr)
+{
+	tsNodeInfo nodeInfo;
+	memset(&nodeInfo, 0, sizeof(tsNodeInfo));
+
+	/* Get information */
+	nodeInfo.nodeFWVer = (uint16)(FW_VERSION);
+	nodeInfo.shortAddr = ZPS_u16AplZdoGetNwkAddr();
+ 	nodeInfo.nodeMacAddr0 = (uint32)ZPS_u64AplZdoGetIeeeAddr();
+    nodeInfo.nodeMacAddr1 = (uint32)(ZPS_u64AplZdoGetIeeeAddr() >> 32);
+    nodeInfo.radioChannel = ZPS_u8AplZdoGetRadioChannel();
+    nodeInfo.role = (uint8)ZPS_eAplZdoGetDeviceType();
+    nodeInfo.panId = (uint16)ZPS_u16AplZdoGetNetworkPanId();
+
+    /* Response */
+	if(API_LOCAL_AT_REQ == reqApiSpec->teApiIdentifier)
+	{
+		uart_printf("ATIF local.\r\n");
+		tsLocalAtResp localAtResp;
+		memset(&localAtResp, 0, sizeof(tsLocalAtResp));
+
+		/* Assemble LocalAtResp */
+		assembleLocalAtResp(&localAtResp,
+							reqApiSpec->payload.localAtReq.frameId,
+							ATIF,
+							AT_OK,
+							(uint8*)&nodeInfo,
+							sizeof(tsNodeInfo));
+
+		/* Assemble apiSpec */
+		assembleApiSpec(respApiSpec,
+						sizeof(tsLocalAtResp),
+						API_LOCAL_AT_RESP,
+						(uint8*)&localAtResp,
+						sizeof(tsLocalAtResp));
+	}
+	else if(API_REMOTE_AT_REQ == reqApiSpec->teApiIdentifier)
+	{
+		uart_printf("ATIF remote.\r\n");
+		tsRemoteAtResp remoteAtResp;
+		memset(&remoteAtResp, 0, sizeof(tsRemoteAtResp));
+
+		/* Assemble RemoteAtResp */
+		assembleRemoteAtResp(&remoteAtResp,
+							 reqApiSpec->payload.remoteAtReq.frameId,
+							 ATIF,
+							 AT_OK,
+							 (uint8*)&nodeInfo,
+							 sizeof(tsNodeInfo),
+							 reqApiSpec->payload.remoteAtReq.unicastAddr);
+
+		/* Assemble apiSpec */
+		assembleApiSpec(respApiSpec,
+						sizeof(tsRemoteAtResp),
+						API_REMOTE_AT_RESP,
+						(uint8*)&remoteAtResp,
+						sizeof(tsRemoteAtResp));
+	}
+	return OK;
+}
 /****************************************************************************
 *
 * NAME: processSerialCmd
@@ -1576,7 +1711,7 @@ int API_i32AdsProcessStackEvent(ZPS_tsAfEvent sStackEvent)
     	  PDUM_eAPduFreeAPduInstance(hapdu_ins);
     	  break;
       }
-    return OK;
+    return result;
 }
 
 /****************************************************************************
